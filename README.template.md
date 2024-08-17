@@ -18,13 +18,49 @@ object hash {
 }
 ```
 
-These pipes take a source byte stream and output a new byte stream. Pulling on the output byte stream causes the source to be pulled on, and all the emitted bytes to be hashed. Upon termination of the source, the hash is finalized and output as a single chunk.
+These pipes take a source byte stream and output a new byte stream. Pulling on the output byte stream causes the source to be pulled on and all bytes emitted from the source are added to the hash calculation. Upon termination of the source, the hash is finalized and output as a single chunk.
+
+Computing the hash of a byte stream can be accomplished by sending that source to a hash pipe and collecting the resulting output in to a collection.
 
 ```scala mdoc:to-string
-import fs2.{Chunk, Pure, Stream}
-import fs2.hash
+import fs2.{Chunk, Pure, Stream, hash}
 import scodec.bits.ByteVector
 
 val source: Stream[Pure, Byte] = Stream.chunk(Chunk.array("The quick brown fox".getBytes))
 val hashed = source.through(hash.sha256).to(ByteVector)
 ```
+
+This works equally well for effectful streams -- for example, hashing a file:
+
+```scala mdoc:reset:to-string
+import cats.effect.IO
+import fs2.{Chunk, Pure, Stream, hash}
+import fs2.io.file.{Files, Path}
+import scodec.bits.ByteVector
+
+val source: Stream[IO, Byte] = Files[IO].readAll(Path("LICENSE"))
+val hashed = source.through(hash.sha256).compile.to(ByteVector)
+
+import cats.effect.unsafe.implicits.global
+val result = hashed.unsafeRunSync()
+```
+
+The `fs2.hash` API is too simple though. Consider a scenario where you want to write a byte stream to a file *and* write a hash of the same byte stream to another file. Doing each of these transformations in isolation is easy:
+
+```scala mdoc:to-string
+def writeToFile[F[_]: Files](source: Stream[F, Byte], path: Path): Stream[F, Nothing] =
+  source.through(Files[F].writeAll(path))
+
+def writeHashToFile[F[_]: Files](source: Stream[F, Byte], path: Path): Stream[F, Nothing] =
+  source.through(hash.sha256).through(Files[F].writeAll(path))
+```
+
+Perhaps the simplest way to combine these functions is via stream composition:
+
+```scala mdoc:to-string
+def writeFileAndHash[F[_]: Files](source: Stream[F, Byte], path: Path): Stream[F, Nothing] =
+  writeToFile(source, path) ++ writeHashToFile(source, Path(path.toString + ".sha256"))
+```
+
+This solution has a few major disadvantages:
+- the source stream is processed twice -- once when writing the file and once when computing the hash
