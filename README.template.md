@@ -62,5 +62,36 @@ def writeFileAndHash[F[_]: Files](source: Stream[F, Byte], path: Path): Stream[F
   writeToFile(source, path) ++ writeHashToFile(source, Path(path.toString + ".sha256"))
 ```
 
-This solution has a few major disadvantages:
-- the source stream is processed twice -- once when writing the file and once when computing the hash
+This approach has a major issue though: the source stream is processed twice -- once when writing the file and once when computing the hash. For some sources, this is simply inefficient. Imagine a source stream that originates from another file on the file system. This solution would result in opening that file twice. The inefficiency is worse for streams with lots of computations, as those computations would be run twice as well.
+
+There's a bigger issue though. Some streams aren't safe to be used multiple times -- a stream of bytes from a network socket for instance. Using those streams more than once often result in unexpected results. When streaming from a socket, the bytes received are gone by the time the stream is run a second time. Maybe the second evaluation returns any new bytes received on the socket? Or maybe the socket was closed as an implementation detail of reaching the end of the source stream and the second evaluation results in an error or a hang.
+
+We need a way to process the source stream once and simultaneously write to the output file and compute the hash. The `broadcastThrough` operation on `Stream` directly supports this use case -- it takes one or more pipes as an argument and sends any emitted elements from the source to all of those pipes, collecting their outputs in to a single output stream. 
+
+
+```scala mdoc:to-string
+import cats.effect.Concurrent
+
+def writeFileAndHashViaBroadcast[F[_]: Files: Concurrent](
+  source: Stream[F, Byte], path: Path
+): Stream[F, Nothing] =
+  source.broadcastThrough(
+    s => writeToFile(s, path),
+    s => writeHashToFile(s, Path(path.toString + ".sha256"))
+  )
+```
+
+Equivalently, since `broadcastThrough` operates on pipes, we could inline the definitions of `writeToFile` and `writeHashToFile` and simplify a bit, keeping each expression as a pipe:
+
+
+```scala mdoc:to-string
+def writeFileAndHashViaBroadcastPipes[F[_]: Files: Concurrent](
+  source: Stream[F, Byte], path: Path
+): Stream[F, Nothing] =
+  source.broadcastThrough(
+    Files[F].writeAll(path),
+    hash.sha256 andThen Files[F].writeAll(Path(path.toString + ".sha256"))
+  )
+```
+
+In either case, we picked up a `Concurrent` constraint, indicating `broadcastThrough` is doing some concurrency.
