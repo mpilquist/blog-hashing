@@ -95,3 +95,31 @@ def writeFileAndHashViaBroadcastPipes[F[_]: Files: Concurrent](
 ```
 
 In either case, we picked up a `Concurrent` constraint, indicating `broadcastThrough` is doing some concurrency.
+
+```scala mdoc:to-string
+import fs2.Pipe
+
+case class Record(id: Long)
+
+case class HashVerificationException(
+  expected: ByteVector,
+  actual: ByteVector
+) extends Exception(s"hash verification failed: expected ${expected.toHex} actual ${actual.toHex}")
+
+def decode[F[_]: Files: Concurrent](
+  source: Stream[F, Byte], 
+  decoder: Pipe[F, Byte, Record], 
+  expectedHash: ByteVector
+): Stream[F, Record] =
+
+  def verifyHash(s: Stream[F, Byte]): Stream[F, Nothing] =
+    s.bufferAll.chunks.map(_.toByteVector).flatMap:
+      computedHash =>
+        if computedHash == expectedHash then Stream.empty
+        else Stream.raiseError(HashVerificationException(expectedHash, computedHash))
+
+  source.broadcastThrough(
+    decoder,
+    hash.sha256 andThen verifyHash
+  )
+```
