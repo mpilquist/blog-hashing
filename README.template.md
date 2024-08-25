@@ -94,7 +94,7 @@ def writeFileAndHashViaBroadcastPipes[F[_]: Files: Concurrent](
   )
 ```
 
-In either case, we picked up a `Concurrent` constraint, indicating `broadcastThrough` is doing some concurrency.
+In either case, we picked up a `Concurrent` constraint, indicating `broadcastThrough` is doing some concurrency. This technique certainly works but it feels a bit overkill. The `broadcastThrough` operator is an example of a scatter-gather algorithm. The chunks from the source stream are scattered to each pipe and the subsequent outputs of those pipes are gathered back in to a single output stream. There's a performance penalty to this this coordination, though if the chunk sizes are sufficiently large then performance is unlikely to be an issue in practice. Still though, it seems like this solution violates the [principle of least power](https://www.lihaoyi.com/post/StrategicScalaStylePrincipleofLeastPower.html#:~:text=If%20your%20function%20only%20needs,can't%20use%20other%20things.).
 
 ```scala mdoc:to-string
 import fs2.Pipe
