@@ -193,4 +193,92 @@ def writeFileAndHash[F[_]: Files: Hashing: MonadCancelThrow](
 
 ## `fs2.hashing`
 
-The fs2 3.11 release introduced the `fs2.hashing` package, which builds upon this general technique.
+The fs2 3.11 release introduced the `fs2.hashing` package, which builds upon this general technique. The `Hashing[F]` capability trait is defined like this:
+
+```scala
+sealed trait Hashing[F[_]]:
+  def hasher(algorithm: HashAlgorithm): Resource[F, Hasher[F]]
+  def hmac(algorithm: HashAlgorithm, key: Chunk[Byte]): Resource[F, Hasher[F]]
+  def hash(algorithm: HashAlgorithm): Pipe[F, Byte, Hash]
+  def hashWith(hasher: Resource[F, Hasher[F]]): Pipe[F, Byte, Hash]
+```
+
+The `Hash` type is a simple wrapper over a `Chunk[Byte]` that has a nice `toString` and a constant time `equals` implementation (to avoid timing attacks).
+
+The `Hasher` type is a bit more interesting:
+
+```scala
+trait Hasher[F[_]]:
+  def update(bytes: Chunk[Byte]): F[Unit]
+  def hash: F[Hash]
+
+  protected def unsafeUpdate(chunk: Chunk[Byte]): Unit
+  protected def unsafeHash(): Hash
+
+  def update: Pipe[F, Byte, Byte] =
+    _.mapChunks: c =>
+      unsafeUpdate(c)
+      c
+
+  def observe(sink: Pipe[F, Byte, Nothing]): Pipe[F, Byte, Hash] =
+    source => sink(update(source)) ++ Stream.eval(hash)
+
+  def drain: Pipe[F, Byte, Hash] = observe(_.drain)
+
+  def verify(expected: Hash): Pipe[F, Byte, Byte] =
+    source =>
+      update(source)
+        .onComplete(
+          Stream
+            .eval(hash)
+            .flatMap: actual =>
+              if actual == expected then Stream.empty
+              else Pull.fail(HashVerificationException(expected, actual)).streamNoScope
+        )
+```
+
+Besides the fundamental `update` and `hash` operations, there's internal `unsafeUpdate` and `unsafeHash` operations and a number of pipes. The `update`, `observe` and `drain` pipes are all things we've seen already. `update` returns a pipe that updates the hasher as chunks are pulled, `observe` does the same for chunks pulled by a sink and emits the computed hash, and `drain` uses `observe` with a drain sink, resulting in the behavior of our original hash pipe. The `verify` pipe is new -- it acts as an identity pipe but raises an error if the source doesn't hash to the expected value.
+
+Writing a file and its hash with `fs2.hashing` looks like this:
+
+```scala
+import cats.effect.MonadCancelThrow
+import fs2.{Stream, Pipe}
+import fs2.hashing.{Hashing, HashAlgorithm}
+import fs2.io.file.{Files, Path}
+
+def writeFileAndHash[F[_]: Hashing: Files: MonadCancelThrow](path: Path): Pipe[F, Byte, Nothing] =
+  source =>
+    // Create a hash
+    Stream.resource(Hashing[F].hasher(HashAlgorithm.SHA3_256)).flatMap: h =>
+      source
+        // Write source to file, updating the hash with observed bytes
+        .through(h.observe(Files[F].writeAll(path)))
+        // Write digest to separate file
+        .map(_.bytes)
+        .unchunks
+        .through(Files[F].writeAll(Path(path.toString + ".sha256")))
+```
+
+What about hashing pure streams though? The operations in `fs2.hash` weren't limited to effectful streams, but we can't define a `Hashing[Pure]` instance due to `Hashing` using mutable state internally. To replace this functionality, `Hashing` defines the `hashPureStream` operation on its companion: 
+
+
+```scala
+import fs2.{Chunk, Pure}
+````
+
+```scala
+val source: Stream[Pure, Byte] = Stream.chunk(Chunk.array("The quick brown fox".getBytes))
+// source: Stream[Pure, Byte] = Stream(..)
+val hashed = Hashing.hashPureStream(HashAlgorithm.SHA256, source)
+// hashed: Hash = 5cac4f980fedc3d3f1f99b4be3472c9b30d56523e632d151237ec9309048bda9
+```
+
+This is internally implemented using `SyncIO` and the `hash` operation:
+
+```scala
+def hashPureStream(algorithm: HashAlgorithm, source: Stream[Pure, Byte]): Hash =
+  source.through(Hashing[SyncIO].hash(algorithm)).compile.lastOrError.unsafeRunSync()
+```
+
+The old `fs2.hash` implementations played a similar trick. They didn't directly use `SyncIO` but rather used carefully placed side effects to avoid needing typeclass constraints.
