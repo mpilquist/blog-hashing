@@ -1,4 +1,4 @@
-# Goldilocks Hashing
+# Streaming Hash Computations
 
 _This article is the latest in a series of posts that discuss evolving functional APIs. The previous post is [Optimizing Functional Walks of File Trees](https://github.com/mpilquist/blog-walks/blob/main/README.md)._
 
