@@ -152,7 +152,7 @@ object Hashing:
   given forSyncIO: Hashing[SyncIO] = forSync[SyncIO]
 ```
 
-The `Hashing[F]` capability trait is a typeclass that allows creation of `Hasher[F]` instances. A new hasher is returned as a `Resource[F, Hasher[F]]`, allowing the implementation to manage initialization and finalization of an instance. This may seem like overkill for a pure function -- afterall, isn't a hash a simple calculation that digests an arbitrary number of bytes in to a fixed size number of bytes? Implementations are free to use operating system resources -- e.g., delegating to a [hardware security module](https://en.wikipedia.org/wiki/Hardware_security_module) and hence abstracting over a communication channel with a hardware device.
+The `Hashing[F]` capability trait is a typeclass that allows creation of `Hasher[F]` instances. A new hasher is returned as a `Resource[F, Hasher[F]]`, allowing the implementation to manage initialization and finalization of an instance. This may seem like overkill for a pure function -- afterall, isn't a hash a simple calculation that digests an arbitrary number of bytes in to a fixed size number of bytes? Implementations are free to use operating system resources thought -- e.g., delegating to a [hardware security module](https://en.wikipedia.org/wiki/Hardware_security_module) and hence abstracting over a communication channel with a hardware device.
 
 Given this new implementation, we can hash a stream in a relatively straightforward fashion:
 
@@ -165,3 +165,5 @@ def hashingPipe[F[_]: Hashing: MonadCancelThrow](algorithm: HashAlgorithm): Pipe
       hasher =>
         source.chunks.flatMap(c => Stream.exec(hasher.update(c))) ++ Stream.eval(hasher.hash).unchunks
 ```
+
+We're back to where we've started -- we've implemented a `Pipe[F, Byte, Byte]` using our new lower level `Hashing` API.
