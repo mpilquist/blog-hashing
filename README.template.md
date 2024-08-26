@@ -258,7 +258,7 @@ def writeFileAndHash[F[_]: Hashing: Files: MonadCancelThrow](path: Path): Pipe[F
 What about hashing pure streams though? The operations in `fs2.hash` weren't limited to effectful streams, but we can't define a `Hashing[Pure]` instance due to `Hashing` using mutable state internally. To replace this functionality, `Hashing` defines the `hashPureStream` operation on its companion: 
 
 
-```scala mdoc:silent
+```scala mdoc:invisible
 import fs2.{Chunk, Pure}
 ````
 
