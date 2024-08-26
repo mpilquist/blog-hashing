@@ -148,8 +148,8 @@ object Hashing:
     def hasher(algorithm: HashAlgorithm): Resource[F, Hasher[F]] =
       ??? // Implementation isn't important right now but assume this delegates to platform crypto apis
 
-//  given forIO: Hashing[IO] = forSync[IO] 
-//  given forSyncIO: Hashing[SyncIO] = forSync[SyncIO]
+  given forIO: Hashing[IO] = forSync[IO] 
+  given forSyncIO: Hashing[SyncIO] = forSync[SyncIO]
 ```
 
 The `Hashing[F]` capability trait is a typeclass that allows creation of `Hasher[F]` instances. A new hasher is returned as a `Resource[F, Hasher[F]]`, allowing the implementation to manage initialization and finalization of an instance. This may seem like overkill for a pure function -- afterall, isn't a hash a simple calculation that digests an arbitrary number of bytes in to a fixed size number of bytes? Implementations are free to use operating system resources -- e.g., delegating to a [hardware security module](https://en.wikipedia.org/wiki/Hardware_security_module) and hence abstracting over a communication channel with a hardware device.
