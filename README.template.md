@@ -158,7 +158,34 @@ def hashingPipe[F[_]: Hashing: MonadCancelThrow](algorithm: HashAlgorithm): Pipe
   source =>
     Stream.resource(Hashing[F].hasher(algorithm)).flatMap:
       hasher =>
-        source.chunks.flatMap(c => Stream.exec(hasher.update(c))) ++ Stream.eval(hasher.hash).unchunks
+        source.chunks.foreach(c => hasher.update(c)) ++ Stream.evalUnChunk(hasher.hash)
 ```
 
-We're back to where we've started -- we've implemented a `Pipe[F, Byte, Byte]` using our new lower level `Hashing` API.
+We're back to where we've started -- we've implemented a `Pipe[F, Byte, Byte]` using our new lower level `Hashing` API. But this API also supports other use cases that our original API did not. Consider this utility function:
+
+```scala mdoc:to-string
+def observe[F[_]: Hashing: MonadCancelThrow](
+  algorithm: HashAlgorithm,
+  sink: Pipe[F, Byte, Nothing]
+): Pipe[F, Byte, Byte] =
+  source =>
+    Stream.resource(Hashing[F].hasher(algorithm)).flatMap:
+      hasher =>
+        source.chunks.evalTap(c => hasher.update(c)).unchunks.through(sink) ++ Stream.evalUnChunk(hasher.hash)
+```
+
+This function takes a sink that operates on bytes and returns a pipe that accepts bytes and emits a single hash as a chunk upon completion. The implementation sends the source to the sink while observing any chunks that pass between them and at completion, emits the computed hash. This combinator lets us implement our original use case of writing a file and writing a hash in a single pass:
+
+```scala mdoc:to-string
+def writeFileAndHash[F[_]: Files: Hashing: MonadCancelThrow](
+  source: Stream[F, Byte],
+  path: Path
+): Stream[F, Nothing] =
+  source
+    .through(observe(HashAlgorithm.SHA256, Files[F].writeAll(path)))
+    .through(Files[F].writeAll(Path(path.toString + ".sha256")))
+```
+
+## `fs2.hashing`
+
+The fs2 3.11 release introduced the `fs2.hashing` package, which builds upon this general technique.
