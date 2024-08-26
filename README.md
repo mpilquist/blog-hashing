@@ -203,7 +203,7 @@ sealed trait Hashing[F[_]]:
   def hashWith(hasher: Resource[F, Hasher[F]]): Pipe[F, Byte, Hash]
 ```
 
-The `Hash` type is a simple wrapper over a `Chunk[Byte]` that has a nice `toString` and a constant time `equals` implementation (to avoid timing attacks).
+In addition to `hasher`, the `Hashing` trait supports [HMAC](https://en.wikipedia.org/wiki/HMAC). The `hash` and `hashWith` operations provide pipes that compute hashes of byte streams. The output type is `Hash` instead of `Byte`. The `Hash` type is a simple wrapper over a `Chunk[Byte]` that has a nice `toString` and a constant time `equals` implementation (to avoid timing attacks).
 
 The `Hasher` type is a bit more interesting:
 
@@ -279,3 +279,12 @@ def hashPureStream(algorithm: HashAlgorithm, source: Stream[Pure, Byte]): Hash =
 ```
 
 The old `fs2.hash` implementations played a similar trick. They didn't directly use `SyncIO` but rather used carefully placed side effects to avoid needing typeclass constraints.
+
+## Conclusion
+
+The hashing support in `fs2.hash` is conceptually elegant but ultimately the wrong abstraction. The API is too opaque to do anything besides hashing a stream. In this article, we took a tour of refactoring this API in to something with much more utility.
+
+Special thanks to:
+- [Antonio Gelameris](https://github.com/TonioGela) for inspiring this new API with a question on the fs2 Discord channel
+- [i10416](https://github.com/i10416) for inspiring addition of SHA3 and HMAC support
+- [Arman Bilge](https://github.com/armanbilge/) for API suggestions and code reviews
